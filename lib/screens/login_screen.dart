@@ -1,19 +1,23 @@
 import 'package:flutter/material.dart';
-import 'package:shared_preferences/shared_preferences.dart';
-import 'home_page.dart'; // Mengimpor halaman utama setelah login
+import 'package:shared_preferences/shared_preferences.dart'; // Untuk menyimpan data lokal
+import 'package:supabase_flutter/supabase_flutter.dart'; // Mengimpor Supabase
+import 'home_page.dart'; // Halaman utama setelah login
 
-class LoginScreen extends StatelessWidget {
+class LoginScreen extends StatefulWidget {
+  @override
+  _LoginScreenState createState() => _LoginScreenState();
+}
+
+class _LoginScreenState extends State<LoginScreen> {
   final TextEditingController _usernameController = TextEditingController();
   final TextEditingController _passwordController = TextEditingController();
-
-  final Map<String, String> dummyData = {
-    'elsa': '1234',
-  };
+  bool _obscurePassword = true;
+  bool _isLoading = false;
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: Colors.blue[50],
+      backgroundColor: Colors.pink[50],
       body: Center(
         child: SingleChildScrollView(
           child: Padding(
@@ -21,7 +25,7 @@ class LoginScreen extends StatelessWidget {
             child: Container(
               padding: const EdgeInsets.all(20),
               decoration: BoxDecoration(
-                color: Colors.blue[100],
+                color: Colors.pink[100],
                 borderRadius: BorderRadius.circular(20),
                 boxShadow: [
                   BoxShadow(
@@ -39,7 +43,7 @@ class LoginScreen extends StatelessWidget {
                       fontSize: 28,
                       fontWeight: FontWeight.bold,
                       letterSpacing: 1.5,
-                      color: Colors.blueGrey,
+                      color: Colors.pinkAccent,
                     ),
                   ),
                   const SizedBox(height: 25),
@@ -49,42 +53,27 @@ class LoginScreen extends StatelessWidget {
                     icon: Icons.email_outlined,
                   ),
                   const SizedBox(height: 15),
-                  _buildTextField(
-                    controller: _passwordController,
-                    label: 'Password',
-                    icon: Icons.lock_outline,
-                    obscureText: true,
-                  ),
+                  _buildPasswordField(),
                   const SizedBox(height: 25),
                   ElevatedButton(
-                    onPressed: () => _handleLogin(context),
+                    onPressed: _isLoading ? null : () => _handleLogin(context),
                     style: ElevatedButton.styleFrom(
-                      backgroundColor: Colors.blueAccent,
+                      backgroundColor: Colors.pinkAccent,
                       padding: const EdgeInsets.symmetric(horizontal: 60, vertical: 12),
                       shape: RoundedRectangleBorder(
                         borderRadius: BorderRadius.circular(25),
                       ),
                     ),
-                    child: const Text(
-                      'LOGIN',
-                      style: TextStyle(
-                        fontSize: 16,
-                        color: Colors.white,
-                        fontWeight: FontWeight.bold,
-                      ),
-                    ),
-                  ),
-                  const SizedBox(height: 10),
-                  GestureDetector(
-                    onTap: () => _handleForgotPassword(context),
-                    child: const Text(
-                      'Forgot Password? Click to reset',
-                      style: TextStyle(
-                        color: Colors.blue,
-                        fontSize: 14,
-                        fontWeight: FontWeight.w600,
-                      ),
-                    ),
+                    child: _isLoading
+                        ? const CircularProgressIndicator()
+                        : const Text(
+                            'LOGIN',
+                            style: TextStyle(
+                              fontSize: 16,
+                              color: Colors.white,
+                              fontWeight: FontWeight.bold,
+                            ),
+                          ),
                   ),
                 ],
               ),
@@ -95,70 +84,81 @@ class LoginScreen extends StatelessWidget {
     );
   }
 
+  // Fungsi untuk menangani login
   void _handleLogin(BuildContext context) async {
     String username = _usernameController.text.trim();
     String password = _passwordController.text.trim();
 
     if (username.isEmpty || password.isEmpty) {
       _showMessage(context, 'Email ID dan password tidak boleh kosong.');
-    } else {
-      if (dummyData[username] == password) {
-        SharedPreferences prefs = await SharedPreferences.getInstance();
-        await prefs.setString('username', username);
+      return;
+    }
 
-        _showMessage(context, 'Login berhasil!');
-        Navigator.pushReplacement(
-          context,
-          MaterialPageRoute(
-            builder: (context) => HomePage(nama: username),
-          ),
-        );
+    setState(() {
+      _isLoading = true;
+    });
+
+    try {
+      // Query ke Supabase untuk mendapatkan role
+      final response = await Supabase.instance.client
+          .from('user')
+          .select('username, role')
+          .eq('username', username)
+          .eq('password', password)
+          .maybeSingle();
+
+      if (response != null) {
+        String role = response['role'] ?? '';
+
+        // Simpan data user ke SharedPreferences
+        SharedPreferences prefs = await SharedPreferences.getInstance();
+        await prefs.setString('username', response['username']);
+        await prefs.setString('role', role);
+
+        // Arahkan ke halaman utama dengan role yang sesuai
+       if (username != null && username.isNotEmpty && role != null && role.isNotEmpty) {
+  print("Navigasi ke HomePage dengan Username: $username dan Role: $role");
+  Navigator.pushReplacement(
+    context,
+    MaterialPageRoute(
+      builder: (context) => HomePage(nama: username, role: role),
+    ),
+  );
+} else {
+  print("Error: Username atau Role kosong/null");
+}
+
+
+        // Tampilkan pesan sukses berdasarkan role
+        _showSuccessMessage(role);
       } else {
-        _showMessage(context, 'Email ID atau password salah.');
+        _showMessage(context, 'Username atau password salah.');
       }
+    } catch (e) {
+      _showMessage(context, 'Terjadi kesalahan: $e');
+    } finally {
+      setState(() {
+        _isLoading = false;
+      });
     }
   }
 
-  void _handleForgotPassword(BuildContext context) {
-    showDialog(
-      context: context,
-      builder: (BuildContext context) {
-        TextEditingController _forgotUsernameController = TextEditingController();
-        return AlertDialog(
-          title: const Text('Reset Password'),
-          content: TextField(
-            controller: _forgotUsernameController,
-            decoration: const InputDecoration(labelText: 'Email ID'),
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.of(context).pop(),
-              child: const Text('Cancel'),
-            ),
-            TextButton(
-              onPressed: () {
-                String inputUsername = _forgotUsernameController.text.trim();
-                if (inputUsername.isEmpty) {
-                  _showMessage(context, 'Email ID tidak boleh kosong.');
-                } else if (dummyData.containsKey(inputUsername)) {
-                  _showMessage(context, 'Password untuk $inputUsername adalah: ${dummyData[inputUsername]}');
-                } else {
-                  _showMessage(context, 'Email ID tidak ditemukan.');
-                }
-                Navigator.of(context).pop();
-              },
-              child: const Text('Submit'),
-            ),
-          ],
-        );
-      },
-    );
-  }
-
+  // Fungsi untuk menampilkan pesan menggunakan SnackBar
   void _showMessage(BuildContext context, String message) {
     ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(message)));
   }
 
+  // Fungsi untuk menampilkan pesan sukses
+  void _showSuccessMessage(String role) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text('Login berhasil sebagai $role'),
+        backgroundColor: Colors.green,
+      ),
+    );
+  }
+
+  // Fungsi untuk membangun text field biasa (untuk username/email)
   Widget _buildTextField({
     required TextEditingController controller,
     required String label,
@@ -169,7 +169,7 @@ class LoginScreen extends StatelessWidget {
       width: 280,
       padding: const EdgeInsets.symmetric(horizontal: 10),
       decoration: BoxDecoration(
-        color: Colors.blue[50],
+        color: Colors.pink[50],
         borderRadius: BorderRadius.circular(20),
         boxShadow: [
           BoxShadow(
@@ -184,9 +184,50 @@ class LoginScreen extends StatelessWidget {
         obscureText: obscureText,
         decoration: InputDecoration(
           border: InputBorder.none,
-          prefixIcon: Icon(icon, color: Colors.blueGrey, size: 20),
+          prefixIcon: Icon(icon, color: Colors.pinkAccent, size: 20),
           hintText: label,
-          hintStyle: const TextStyle(color: Colors.blueGrey, fontSize: 14),
+          hintStyle: const TextStyle(color: Colors.pinkAccent, fontSize: 14),
+        ),
+      ),
+    );
+  }
+
+  // Fungsi untuk membangun text field khusus untuk password
+  Widget _buildPasswordField() {
+    return Container(
+      width: 280,
+      padding: const EdgeInsets.symmetric(horizontal: 10),
+      decoration: BoxDecoration(
+        color: Colors.pink[50],
+        borderRadius: BorderRadius.circular(20),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withOpacity(0.05),
+            blurRadius: 5,
+            offset: const Offset(0, 3),
+          ),
+        ],
+      ),
+      child: TextField(
+        controller: _passwordController,
+        obscureText: _obscurePassword,
+        decoration: InputDecoration(
+          border: InputBorder.none,
+          prefixIcon: const Icon(Icons.lock_outline, color: Colors.pinkAccent, size: 20),
+          hintText: 'Password',
+          hintStyle: const TextStyle(color: Colors.pinkAccent, fontSize: 14),
+          suffixIcon: IconButton(
+            icon: Icon(
+              _obscurePassword ? Icons.visibility_off : Icons.visibility,
+              color: Colors.pinkAccent,
+              size: 20,
+            ),
+            onPressed: () {
+              setState(() {
+                _obscurePassword = !_obscurePassword;
+              });
+            },
+          ),
         ),
       ),
     );
